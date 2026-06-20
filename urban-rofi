@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import subprocess
+import sys
+import textwrap
+from typing import Any, Dict, List, Optional
+
+import requests
+
+API = "https://api.urbandictionary.com/v0/define?term="
+PAGE_SIZE = 5
+
+SEARCH_ROFI = ["rofi", "-dmenu", "-i", "-no-custom", "-matching", "fuzzy"]
+RESULT_ROFI = ["rofi", "-dmenu", "-i", "-no-custom", "-matching", "fuzzy"]
+
+
+def run_rofi(prompt: str, items: List[str], cmd: List[str]) -> Optional[str]:
+    if not items:
+        return None
+
+    proc = subprocess.run(
+        cmd + ["-p", prompt],
+        input="\n".join(items),
+        text=True,
+        capture_output=True,
+    )
+    choice = proc.stdout.strip()
+    return choice or None
+
+
+def show_message(message: str) -> None:
+    # Forces a solid dark background and bright white text for readability
+    theme_override = (
+        "window { width: 900px; background-color: #111111DD; border: 3px; border-color: #ff276c; padding: 10px; }"
+        "mainbox { background-color: transparent; }"
+        "textbox { text-color: #eae940; background-color: transparent; }"
+    )
+
+    subprocess.run(
+        ["rofi", "-theme-str", theme_override, "-e", message],
+        text=True,
+        capture_output=True,
+    )
+
+def normalize(text: str) -> str:
+    return " ".join(text.split()).strip()
+
+
+def fetch_entries(term: str) -> List[Dict[str, Any]]:
+    try:
+        resp = requests.get(API + term, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        show_message(f"Failed to fetch definition:\n\n{exc}")
+        return []
+
+    entries = data.get("list", [])
+    if not isinstance(entries, list):
+        return []
+
+    return entries
+
+
+def get_year(entry: Dict[str, Any]) -> str:
+    # Safely extract the 4-digit year from the ISO date string (e.g., "2004-12-14T...")
+    date_str = str(entry.get("written_on", ""))
+    if len(date_str) >= 4 and date_str[:4].isdigit():
+        return date_str[:4]
+    return "????"
+
+
+def preview(entry: Dict[str, Any], width: int = 110) -> str:
+    definition = normalize(str(entry.get("definition", "")))
+    if not definition:
+        return "(no definition)"
+    return textwrap.shorten(definition, width=width, placeholder="...")
+
+
+def format_list_item(entry):
+    year = get_year(entry)
+    prev_text = preview(entry, width=65)
+    return f"{prev_text:<55} | 📅 {year}"
+
+
+def format_detail(entry: Dict[str, Any]) -> str:
+    word = str(entry.get("word", "")).strip() or "(unknown)"
+    
+    # Grab the full YYYY-MM-DD for the detail view
+    full_date = str(entry.get("written_on", "")).split("T")[0]
+    date_display = f"📅 Written: {full_date}" if full_date else ""
+
+    definition = normalize(str(entry.get("definition", "")))
+    example = normalize(str(entry.get("example", "")))
+    author = str(entry.get("author", "")).strip()
+
+    parts = [
+        word,
+        "",
+    ]
+    
+    if date_display:
+        parts.append(date_display)
+        parts.append("")
+
+    parts.extend([
+        "Definition:",
+        textwrap.fill(definition or "(no definition)", width=72),
+    ])
+
+    if example:
+        parts += [
+            "",
+            "Example:",
+            textwrap.fill(example, width=72),
+        ]
+
+    if author:
+        parts += [
+            "",
+            f"Author: {author}",
+        ]
+
+    return "\n".join(parts)
+
+
+def page_items(entries: List[Dict[str, Any]], page: int) -> List[str]:
+    start = page * PAGE_SIZE
+    end = start + PAGE_SIZE
+    chunk = entries[start:end]
+
+    items = [format_list_item(e) for e in chunk]
+
+    if page > 0:
+        items.append("◀ Previous page")
+    if end < len(entries):
+        items.append("Next page ▶")
+
+    return items
+
+
+def main() -> int:
+    if len(sys.argv) > 1:
+        term = " ".join(sys.argv[1:]).strip()
+    else:
+        proc = subprocess.run(
+            ["rofi", "-dmenu", "-p", "Urban Dictionary"],
+            text=True,
+            capture_output=True,
+        )
+        term = proc.stdout.strip()
+
+    if not term:
+        return 0
+
+    entries = fetch_entries(term)
+    if not entries:
+        show_message(f"No results found for:\n\n{term}")
+        return 0
+
+    page = 0
+
+    while True:
+        items = page_items(entries, page)
+        choice = run_rofi(f"Urban Dictionary ({page + 1})", items, RESULT_ROFI)
+        if choice is None:
+            return 0
+
+        start = page * PAGE_SIZE
+        end = start + PAGE_SIZE
+        chunk = entries[start:end]
+
+        if choice == "◀ Previous page":
+            page = max(0, page - 1)
+            continue
+
+        if choice == "Next page ▶":
+            if end < len(entries):
+                page += 1
+            continue
+
+        try:
+            idx = [format_list_item(e) for e in chunk].index(choice)
+        except ValueError:
+            return 0
+
+        show_message(format_detail(chunk[idx]))
+        return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
