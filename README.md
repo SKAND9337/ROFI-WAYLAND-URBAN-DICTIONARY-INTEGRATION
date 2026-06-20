@@ -26,5 +26,7 @@ Integrates Urban Dictionary search in rofi(-wayland) using python accessible thr
 5. Enjoy
 
 
-Use, modify, republish however you want
----------------------------------------
+Use, modify, republish to your heart's content
+----------------------------------------------
+
+PS: rewrite in rust for memory safety
