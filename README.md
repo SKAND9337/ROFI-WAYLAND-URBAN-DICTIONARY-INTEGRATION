@@ -1,9 +1,8 @@
 # ROFI-WAYLAND-URBAN-DICTIONARY-INTEGRATION
-
 NOTE: Collaborative vibe-coding effort between ChatGPT and Gemini
 -----------------------------------------------------------------
 
-Integrates Urban Dictionary search in rofi(-wayland) accessible through preferred keybind.
+Integrates Urban Dictionary search in rofi(-wayland) using python accessible through preferred keybind.
 
 ## How To Use:
 1. Install dependencies:
