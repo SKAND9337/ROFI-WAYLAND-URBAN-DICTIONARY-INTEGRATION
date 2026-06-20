@@ -1,6 +1,5 @@
 # ROFI-WAYLAND-URBAN-DICTIONARY-INTEGRATION
 
------------------------------------------------------------------
 NOTE: Collaborative vibe-coding effort between ChatGPT and Gemini
 -----------------------------------------------------------------
 
@@ -25,6 +24,6 @@ Integrates Urban Dictionary search in rofi(-wayland) accessible through preferre
    
 7. Enjoy
 
----------------------------------------
+
 Use, modify, republish however you want
 ---------------------------------------
