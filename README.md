@@ -1,5 +1,4 @@
 # ROFI-WAYLAND-URBAN-DICTIONARY-INTEGRATION
-Integrates an Urban Dictionary API to rofi-wayland
 
 -----------------------------------------------------------------
 NOTE: Collaborative vibe-coding effort between ChatGPT and Gemini
