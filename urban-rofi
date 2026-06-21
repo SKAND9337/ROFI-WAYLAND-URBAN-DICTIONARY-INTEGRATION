@@ -13,6 +13,7 @@ import requests
 API = "https://api.urbandictionary.com/v0/define"
 PAGE_SIZE = 5
 MAX_HISTORY = 200
+REQUEST_HEADERS = {"User-Agent": "urban-rofi/1.1"}
 
 SEARCH_ROFI = ["rofi", "-dmenu", "-i", "-no-custom", "-matching", "fuzzy"]
 RESULT_ROFI = ["rofi", "-dmenu", "-i", "-no-custom", "-matching", "fuzzy"]
@@ -25,14 +26,47 @@ def run_rofi(prompt: str, items: List[str], cmd: List[str], allow_custom: bool =
     if allow_custom and "-no-custom" in rofi_cmd:
         rofi_cmd.remove("-no-custom")
 
-    proc = subprocess.run(
-        rofi_cmd + ["-p", prompt],
-        input="\n".join(items),
-        text=True,
-        capture_output=True,
-    )
+    try:
+        proc = subprocess.run(
+            rofi_cmd + ["-p", prompt],
+            input="\n".join(items),
+            text=True,
+            capture_output=True,
+        )
+    except FileNotFoundError:
+        show_message("rofi is not installed or is not available in PATH.")
+        return None
+
     choice = proc.stdout.strip()
     return choice or None
+
+
+def run_rofi_index(prompt: str, items: List[str], cmd: List[str]) -> Optional[int]:
+    rofi_cmd = cmd[:]
+    if "-format" not in rofi_cmd:
+        rofi_cmd.extend(["-format", "i"])
+
+    try:
+        proc = subprocess.run(
+            rofi_cmd + ["-p", prompt],
+            input="\n".join(items),
+            text=True,
+            capture_output=True,
+        )
+    except FileNotFoundError:
+        show_message("rofi is not installed or is not available in PATH.")
+        return None
+
+    choice = proc.stdout.strip()
+    if not choice:
+        return None
+
+    try:
+        idx = int(choice)
+    except ValueError:
+        return None
+
+    return idx if 0 <= idx < len(items) else None
 
 
 def show_message(message: str) -> None:
@@ -43,15 +77,26 @@ def show_message(message: str) -> None:
         "textbox { text-color: #eae940; background-color: transparent; }"
     )
 
-    subprocess.run(
-        ["rofi", "-theme-str", theme_override, "-e", message],
-        text=True,
-        capture_output=True,
-    )
+    try:
+        subprocess.run(
+            ["rofi", "-theme-str", theme_override, "-e", message],
+            text=True,
+            capture_output=True,
+        )
+    except FileNotFoundError:
+        print(message, file=sys.stderr)
 
 
 def normalize(text: str) -> str:
     return " ".join(text.split()).strip()
+
+
+def as_text(value: Any) -> str:
+    return normalize(value) if isinstance(value, str) else ""
+
+
+def clean_urban_text(value: Any) -> str:
+    return as_text(value).replace("[", "").replace("]", "")
 
 
 def load_history() -> List[str]:
@@ -101,9 +146,16 @@ def save_history(term: str) -> None:
 
 def fetch_entries(term: str) -> List[Dict[str, Any]]:
     try:
-        resp = requests.get(API, params={"term": term}, timeout=10)
+        resp = requests.get(API, params={"term": term}, headers=REQUEST_HEADERS, timeout=10)
         resp.raise_for_status()
         data = resp.json()
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else "unknown"
+        show_message(f"Urban Dictionary API error ({status}):\n\n{exc}")
+        return []
+    except ValueError as exc:
+        show_message(f"Failed to parse Urban Dictionary response:\n\n{exc}")
+        return []
     except Exception as exc:
         show_message(f"Failed to fetch definition:\n\n{exc}")
         return []
@@ -117,14 +169,14 @@ def fetch_entries(term: str) -> List[Dict[str, Any]]:
 
 def get_year(entry: Dict[str, Any]) -> str:
     # Safely extract the 4-digit year from the ISO date string
-    date_str = str(entry.get("written_on", ""))
+    date_str = as_text(entry.get("written_on"))
     if len(date_str) >= 4 and date_str[:4].isdigit():
         return date_str[:4]
     return "????"
 
 
 def preview(entry: Dict[str, Any], width: int = 110) -> str:
-    definition = normalize(str(entry.get("definition", "")))
+    definition = clean_urban_text(entry.get("definition"))
     if not definition:
         return "(no definition)"
     return textwrap.shorten(definition, width=width, placeholder="...")
@@ -133,18 +185,23 @@ def preview(entry: Dict[str, Any], width: int = 110) -> str:
 def format_list_item(entry: Dict[str, Any]) -> str:
     year = get_year(entry)
     prev_text = preview(entry, width=65)
-    return f"{prev_text:<55} | 📅 {year}"
+    thumbs_up = entry.get("thumbs_up")
+    score = f" | +{thumbs_up}" if isinstance(thumbs_up, int) else ""
+    return f"{prev_text:<55} | 📅 {year}{score}"
 
 
 def format_detail(entry: Dict[str, Any]) -> str:
-    word = str(entry.get("word", "")).strip() or "(unknown)"
+    word = as_text(entry.get("word")) or "(unknown)"
 
-    full_date = str(entry.get("written_on", "")).split("T")[0]
+    full_date = as_text(entry.get("written_on")).split("T")[0]
     date_display = f"📅 Written: {full_date}" if full_date else ""
 
-    definition = normalize(str(entry.get("definition", "")))
-    example = normalize(str(entry.get("example", "")))
-    author = str(entry.get("author", "")).strip()
+    definition = clean_urban_text(entry.get("definition"))
+    example = clean_urban_text(entry.get("example"))
+    author = as_text(entry.get("author"))
+    permalink = as_text(entry.get("permalink"))
+    thumbs_up = entry.get("thumbs_up")
+    thumbs_down = entry.get("thumbs_down")
 
     parts = [
         word,
@@ -154,6 +211,11 @@ def format_detail(entry: Dict[str, Any]) -> str:
     if date_display:
         parts.append(date_display)
         parts.append("")
+
+    if isinstance(thumbs_up, int) or isinstance(thumbs_down, int):
+        up = thumbs_up if isinstance(thumbs_up, int) else "?"
+        down = thumbs_down if isinstance(thumbs_down, int) else "?"
+        parts.extend([f"Votes: +{up} / -{down}", ""])
 
     parts.extend(
         [
@@ -175,6 +237,12 @@ def format_detail(entry: Dict[str, Any]) -> str:
             f"Author: {author}",
         ]
 
+    if permalink:
+        parts += [
+            "",
+            permalink,
+        ]
+
     return "\n".join(parts)
 
 
@@ -191,6 +259,10 @@ def page_items(entries: List[Dict[str, Any]], page: int) -> List[str]:
         items.append("Next page ▶")
 
     return items
+
+
+def total_pages(item_count: int) -> int:
+    return max(1, (item_count + PAGE_SIZE - 1) // PAGE_SIZE)
 
 
 def choose_term() -> Optional[str]:
@@ -220,29 +292,32 @@ def main() -> int:
 
     while True:
         items = page_items(entries, page)
-        choice = run_rofi(f"Urban Dictionary ({page + 1})", items, RESULT_ROFI)
-        if choice is None:
+        choice_idx = run_rofi_index(
+            f"Urban Dictionary ({page + 1}/{total_pages(len(entries))})",
+            items,
+            RESULT_ROFI,
+        )
+        if choice_idx is None:
             return 0
 
         start = page * PAGE_SIZE
         end = start + PAGE_SIZE
         chunk = entries[start:end]
+        nav_idx = len(chunk)
 
-        if choice == "◀ Previous page":
+        if page > 0 and choice_idx == nav_idx:
             page = max(0, page - 1)
             continue
 
-        if choice == "Next page ▶":
+        if end < len(entries) and choice_idx == nav_idx + (1 if page > 0 else 0):
             if end < len(entries):
                 page += 1
             continue
 
-        try:
-            idx = [format_list_item(e) for e in chunk].index(choice)
-        except ValueError:
+        if choice_idx >= len(chunk):
             return 0
 
-        show_message(format_detail(chunk[idx]))
+        show_message(format_detail(chunk[choice_idx]))
         return 0
 
 
