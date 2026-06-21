@@ -25,8 +25,12 @@ Integrates Urban Dictionary search in rofi(-wayland) using python accessible thr
    
 5. Enjoy
 
+----------------------------------------------------------------
+Search History is saved at `.local/share/urban-rofi/history.txt`
+Recommended to symlink somewhere easier to access, it also appears in rofi when urban dictionary script is ran.
 
+----------------------------------------------
 Use, modify, republish to your heart's content
 ----------------------------------------------
 
-PS: rewrite in rust for memory safety
+PS: rewrite in rust for memory safety xd
