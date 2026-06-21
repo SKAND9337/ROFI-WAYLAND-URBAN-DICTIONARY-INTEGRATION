@@ -5,23 +5,28 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
 
-API = "https://api.urbandictionary.com/v0/define?term="
+API = "https://api.urbandictionary.com/v0/define"
 PAGE_SIZE = 5
+MAX_HISTORY = 200
 
 SEARCH_ROFI = ["rofi", "-dmenu", "-i", "-no-custom", "-matching", "fuzzy"]
 RESULT_ROFI = ["rofi", "-dmenu", "-i", "-no-custom", "-matching", "fuzzy"]
 
+HISTORY_FILE = Path.home() / ".local" / "share" / "urban-rofi" / "history.txt"
 
-def run_rofi(prompt: str, items: List[str], cmd: List[str]) -> Optional[str]:
-    if not items:
-        return None
+
+def run_rofi(prompt: str, items: List[str], cmd: List[str], allow_custom: bool = False) -> Optional[str]:
+    rofi_cmd = cmd[:]
+    if allow_custom and "-no-custom" in rofi_cmd:
+        rofi_cmd.remove("-no-custom")
 
     proc = subprocess.run(
-        cmd + ["-p", prompt],
+        rofi_cmd + ["-p", prompt],
         input="\n".join(items),
         text=True,
         capture_output=True,
@@ -31,7 +36,7 @@ def run_rofi(prompt: str, items: List[str], cmd: List[str]) -> Optional[str]:
 
 
 def show_message(message: str) -> None:
-    # Forces a solid dark background and bright white text for readability
+    # Forces a solid dark background and bright text for readability
     theme_override = (
         "window { width: 900px; background-color: #111111DD; border: 3px; border-color: #ff276c; padding: 10px; }"
         "mainbox { background-color: transparent; }"
@@ -44,13 +49,59 @@ def show_message(message: str) -> None:
         capture_output=True,
     )
 
+
 def normalize(text: str) -> str:
     return " ".join(text.split()).strip()
 
 
+def load_history() -> List[str]:
+    if not HISTORY_FILE.exists():
+        return []
+
+    try:
+        lines = HISTORY_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return []
+
+    seen = set()
+    history: List[str] = []
+
+    for line in lines[::-1]:
+        term = normalize(line)
+        if not term:
+            continue
+        key = term.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        history.append(term)
+
+    return history
+
+
+def save_history(term: str) -> None:
+    term = normalize(term)
+    if not term:
+        return
+
+    HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    history = load_history()
+    key = term.casefold()
+    history = [item for item in history if item.casefold() != key]
+    history.insert(0, term)
+    history = history[:MAX_HISTORY]
+
+    try:
+        HISTORY_FILE.write_text("\n".join(history) + "\n", encoding="utf-8")
+    except Exception:
+        # History should never break the dictionary lookup
+        pass
+
+
 def fetch_entries(term: str) -> List[Dict[str, Any]]:
     try:
-        resp = requests.get(API + term, timeout=10)
+        resp = requests.get(API, params={"term": term}, timeout=10)
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:
@@ -65,7 +116,7 @@ def fetch_entries(term: str) -> List[Dict[str, Any]]:
 
 
 def get_year(entry: Dict[str, Any]) -> str:
-    # Safely extract the 4-digit year from the ISO date string (e.g., "2004-12-14T...")
+    # Safely extract the 4-digit year from the ISO date string
     date_str = str(entry.get("written_on", ""))
     if len(date_str) >= 4 and date_str[:4].isdigit():
         return date_str[:4]
@@ -79,7 +130,7 @@ def preview(entry: Dict[str, Any], width: int = 110) -> str:
     return textwrap.shorten(definition, width=width, placeholder="...")
 
 
-def format_list_item(entry):
+def format_list_item(entry: Dict[str, Any]) -> str:
     year = get_year(entry)
     prev_text = preview(entry, width=65)
     return f"{prev_text:<55} | 📅 {year}"
@@ -87,8 +138,7 @@ def format_list_item(entry):
 
 def format_detail(entry: Dict[str, Any]) -> str:
     word = str(entry.get("word", "")).strip() or "(unknown)"
-    
-    # Grab the full YYYY-MM-DD for the detail view
+
     full_date = str(entry.get("written_on", "")).split("T")[0]
     date_display = f"📅 Written: {full_date}" if full_date else ""
 
@@ -100,15 +150,17 @@ def format_detail(entry: Dict[str, Any]) -> str:
         word,
         "",
     ]
-    
+
     if date_display:
         parts.append(date_display)
         parts.append("")
 
-    parts.extend([
-        "Definition:",
-        textwrap.fill(definition or "(no definition)", width=72),
-    ])
+    parts.extend(
+        [
+            "Definition:",
+            textwrap.fill(definition or "(no definition)", width=72),
+        ]
+    )
 
     if example:
         parts += [
@@ -141,19 +193,23 @@ def page_items(entries: List[Dict[str, Any]], page: int) -> List[str]:
     return items
 
 
-def main() -> int:
+def choose_term() -> Optional[str]:
     if len(sys.argv) > 1:
-        term = " ".join(sys.argv[1:]).strip()
-    else:
-        proc = subprocess.run(
-            ["rofi", "-dmenu", "-p", "Urban Dictionary"],
-            text=True,
-            capture_output=True,
-        )
-        term = proc.stdout.strip()
+        return normalize(" ".join(sys.argv[1:]))
 
+    history = load_history()
+    items = history[:]
+
+    choice = run_rofi("Urban Dictionary", items, SEARCH_ROFI, allow_custom=True)
+    return normalize(choice) if choice else None
+
+
+def main() -> int:
+    term = choose_term()
     if not term:
         return 0
+
+    save_history(term)
 
     entries = fetch_entries(term)
     if not entries:
@@ -192,4 +248,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
