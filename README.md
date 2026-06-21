@@ -3,6 +3,7 @@ NOTE: Collaborative vibe-coding effort between ChatGPT and Gemini
 -----------------------------------------------------------------
 
 Integrates Urban Dictionary search in rofi(-wayland) using python accessible through preferred keybind.
+[Theres a second version that integrates Free Dictionary API instead](https://github.com/SKAND9337/ROFI-WAYLAND-FREE-DICTIONARY-INTEGRATION)
 
 ## How To Use:
 1. Install dependencies:
@@ -19,9 +20,9 @@ Integrates Urban Dictionary search in rofi(-wayland) using python accessible thr
    
 4. Add a preferred launch keybind
       > 4.1. I'm on Hyprland (0.55) so for me (lua) syntax would be:
-   `hl.bind(mainMod .. " + CTRL + U", hl.dsp.exec_cmd("~/.local/bin/urban-rofi"))`
+   `hl.bind(mainMod .. " + SHIFT + U", hl.dsp.exec_cmd("~/.local/bin/urban-rofi"))`
 
-      > This uses SUPER+CTRL+U to open the search plugin, change as necessary
+      > This uses SUPER+SHIFT+U to open the search plugin, change as necessary
    
 5. Enjoy
 
